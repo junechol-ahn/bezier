@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bézier Curve Interactive Visualization</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif;
+            background-color: #f0f2f5;
+            color: #333;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin: 0;
+            padding: 20px;
+            box-sizing: border-box;
+            height: 100vh;
+        }
+        h1 {
+            color: #1a1a1a;
+            margin-bottom: 5px;
+        }
+        p {
+            color: #555;
+            max-width: 800px;
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        canvas {
+            background-color: #ffffff;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            cursor: pointer;
+        }
+        .controls {
+            margin-top: 15px;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        label {
+            font-size: 14px;
+        }
+        input[type="range"] {
+            width: 200px;
+        }
+        #t-value {
+            font-weight: bold;
+            font-size: 16px;
+            color: #007bff;
+            min-width: 50px;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Bézier Curve 시각화</h1>
+    <p>
+        베지어 곡선은 4개의 <strong>제어점(Control Points)</strong>으로 정의됩니다. 시작점(P0)과 끝점(P2)은 곡선 위에 있으며, 두 개의 중간 제어점(P1, P2)은 곡선의 모양을 결정합니다.
+        애니메이션은 <strong>드 카스텔조 알고리즘(De Casteljau's algorithm)</strong>을 통해 곡선 위의 한 점(B)이 어떻게 계산되는지 보여줍니다. 제어점을 마우스로 드래그하여 곡선을 직접 만들어 보세요.
+    </p>
+
+    <canvas id="bezierCanvas"></canvas>
+
+    <div class="controls">
+        <label for="t-slider">시간 (t): </label>
+        <input type="range" id="t-slider" min="0" max="1" step="0.005" value="0">
+        <span id="t-value">0.000</span>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('bezierCanvas');
+        const ctx = canvas.getContext('2d');
+
+        const tSlider = document.getElementById('t-slider');
+        const tValueDisplay = document.getElementById('t-value');
+
+        // 캔버스 크기 설정
+        let width = Math.min(window.innerWidth - 40, 800);
+        let height = Math.min(window.innerHeight - 250, 500);
+        canvas.width = width;
+        canvas.height = height;
+        
+        // 제어점 (Control Points) 초기 위치 설정
+        let points = [
+            { x: width * 0.1, y: height * 0.8 }, // P0 (시작점)
+            { x: width * 0.2, y: height * 0.1 }, // P1 (제어점 1)
+            { x: width * 0.8, y: height * 0.1 }, // P2 (제어점 2)
+            { x: width * 0.9, y: height * 0.8 }  // P3 (끝점)
+        ];
+
+        let t = 0;
+        let animationFrameId;
+        let isAnimating = true;
+
+        // 마우스 상호작용 관련 변수
+        let selectedPoint = null;
+        let isDragging = false;
+        const pointRadius = 8;
+
+        /**
+         * 두 점 사이의 선형 보간(Linear Interpolation, lerp)
+         * @param {object} p1 - {x, y} 형태의 점
+         * @param {object} p2 - {x, y} 형태의 점
+         * @param {number} t - 0과 1 사이의 시간 값
+         * @returns {object} 보간된 점 {x, y}
+         */
+        function lerp(p1, p2, t) {
+            return {
+                x: p1.x * (1 - t) + p2.x * t,
+                y: p1.y * (1 - t) + p2.y * t
+            };
+        }
+        
+        /**
+         * 드 카스텔조 알고리즘을 이용해 베지어 곡선 위의 점을 계산
+         * @param {array} controlPoints - 제어점 배열
+         * @param {number} t - 시간 값
+         * @returns {array} 각 단계의 보간된 점들을 포함하는 배열
+         */
+        function getDeCasteljauPoints(controlPoints, t) {
+            const stages = [controlPoints];
+            let currentPoints = controlPoints;
+            while (currentPoints.length > 1) {
+                const newPoints = [];
+                for (let i = 0; i < currentPoints.length - 1; i++) {
+                    newPoints.push(lerp(currentPoints[i], currentPoints[i+1], t));
+                }
+                stages.push(newPoints);
+                currentPoints = newPoints;
+            }
+            return stages;
+        }
+
+        /**
+         * 캔버스에 그림을 그리는 주 함수
+         */
+        function draw() {
+            ctx.clearRect(0, 0, width, height);
+
+            // 보간 과정 계산
+            const stages = getDeCasteljauPoints(points, t);
+
+            // 1. 보조선과 보간점 그리기
+            const colors = ["#999999", "#2a9d8f", "#e9c46a"];
+            for (let i = 0; i < stages.length - 1; i++) {
+                const stagePoints = stages[i];
+                // 선 그리기
+                ctx.strokeStyle = colors[i] || "#cccccc";
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                for(let j = 0; j < stagePoints.length - 1; j++) {
+                    ctx.moveTo(stagePoints[j].x, stagePoints[j].y);
+                    ctx.lineTo(stagePoints[j+1].x, stagePoints[j+1].y);
+                }
+                ctx.stroke();
+
+                // 점 그리기 (제어점 제외)
+                if (i > 0) {
+                     stagePoints.forEach(p => drawPoint(p, colors[i-1], 5));
+                }
+            }
+            
+            // 2. 전체 베지어 곡선 경로 그리기
+            ctx.strokeStyle = "#333333";
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            ctx.moveTo(points[0].x, points[0].y);
+            for (let i = 0.01; i <= 1; i += 0.01) {
+                const curvePoint = getDeCasteljauPoints(points, i).pop()[0];
+                ctx.lineTo(curvePoint.x, curvePoint.y);
+            }
+            ctx.stroke();
+
+            // 3. 현재 t까지의 베지어 곡선 그리기
+            ctx.strokeStyle = "#007bff";
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            ctx.moveTo(points[0].x, points[0].y);
+            const path = [];
+            for (let i = 0; i <= t; i += 0.01) {
+                const curvePoint = getDeCasteljauPoints(points, i).pop()[0];
+                path.push(curvePoint);
+                ctx.lineTo(curvePoint.x, curvePoint.y);
+            }
+            ctx.stroke();
+
+            // 4. 제어점(P0, P1, P2, P3) 그리기
+            points.forEach(p => drawPoint(p, "#d62828", pointRadius));
+            
+            // 5. 최종점(B) 그리기
+            const finalPoint = stages.pop()[0];
+            drawPoint(finalPoint, "#007bff", 7);
+
+            // 제어점 라벨 표시
+            points.forEach((p, i) => {
+                ctx.fillStyle = "#333";
+                ctx.font = "bold 14px sans-serif";
+                ctx.fillText(`P${i}`, p.x + 12, p.y + 5);
+            });
+        }
+
+        /**
+         * 점을 그리는 헬퍼 함수
+         * @param {object} p - 점 {x, y}
+         * @param {string} color - 색상
+         * @param {number} radius - 반지름
+         */
+        function drawPoint(p, color, radius) {
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, radius, 0, 2 * Math.PI);
+            ctx.fill();
+        }
+
+        /**
+         * 애니메이션 루프
+         */
+        function animate() {
+            if (isAnimating) {
+                t += 0.005;
+                if (t > 1) {
+                    t = 0;
+                }
+                tSlider.value = t;
+            }
+            
+            tValueDisplay.textContent = t.toFixed(3);
+            draw();
+            animationFrameId = requestAnimationFrame(animate);
+        }
+
+        // --- 이벤트 리스너 ---
+
+        // 슬라이더 이벤트
+        tSlider.addEventListener('input', (e) => {
+            t = parseFloat(e.target.value);
+            isAnimating = false; // 슬라이더 조작 시 자동 애니메이션 중지
+            tValueDisplay.textContent = t.toFixed(3);
+            if (!animationFrameId) {
+                draw(); // 애니메이션이 멈췄을 때 수동으로 그리기
+            }
+        });
+
+        // 마우스 이벤트 (드래그 앤 드롭)
+        canvas.addEventListener('mousedown', (e) => {
+            const mousePos = { x: e.offsetX, y: e.offsetY };
+            for (const p of points) {
+                const dist = Math.sqrt((p.x - mousePos.x)**2 + (p.y - mousePos.y)**2);
+                if (dist < pointRadius) {
+                    selectedPoint = p;
+                    isDragging = true;
+                    isAnimating = false; // 드래그 시작 시 애니메이션 중지
+                    canvas.style.cursor = 'grabbing';
+                    cancelAnimationFrame(animationFrameId); // 애니메이션 정지
+                    return;
+                }
+            }
+        });
+
+        canvas.addEventListener('mousemove', (e) => {
+            const mousePos = { x: e.offsetX, y: e.offsetY };
+            if (isDragging && selectedPoint) {
+                selectedPoint.x = mousePos.x;
+                selectedPoint.y = mousePos.y;
+                draw(); // 드래그하는 동안 실시간으로 다시 그리기
+            } else {
+                 // 제어점 위에 마우스가 올라가면 커서 변경
+                let onPoint = false;
+                for (const p of points) {
+                    const dist = Math.sqrt((p.x - mousePos.x)**2 + (p.y - mousePos.y)**2);
+                    if (dist < pointRadius) {
+                        onPoint = true;
+                        break;
+                    }
+                }
+                canvas.style.cursor = onPoint ? 'grab' : 'pointer';
+            }
+        });
+
+        canvas.addEventListener('mouseup', () => {
+            isDragging = false;
+            selectedPoint = null;
+            canvas.style.cursor = 'pointer';
+            // 드래그가 끝나면 다시 애니메이션 시작
+            isAnimating = true;
+            animationFrameId = requestAnimationFrame(animate);
+        });
+        
+        canvas.addEventListener('mouseleave', () => {
+            if (isDragging) {
+                 isDragging = false;
+                 selectedPoint = null;
+                 isAnimating = true;
+                 animationFrameId = requestAnimationFrame(animate);
+            }
+        });
+        
+        // 창 크기 변경 시 캔버스 리사이즈 (간단한 버전)
+        window.addEventListener('resize', () => {
+            width = Math.min(window.innerWidth - 40, 800);
+            height = Math.min(window.innerHeight - 250, 500);
+            canvas.width = width;
+            canvas.height = height;
+            // 리사이즈 시 제어점 위치 재조정 (비율 유지) - 간단하게 초기화
+            points = [
+                { x: width * 0.1, y: height * 0.8 },
+                { x: width * 0.2, y: height * 0.1 },
+                { x: width * 0.8, y: height * 0.1 },
+                { x: width * 0.9, y: height * 0.8 }
+            ];
+            draw();
+        });
+
+
+        // 애니메이션 시작
+        animate();
+    </script>
+
+</body>
+</html>
